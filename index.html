@@ -5,26 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>鐘奕诗 - 生日快乐</title>
     <style>
-        * { user-select: none; -webkit-user-select: none; touch-action: manipulation; box-sizing: border-box; }
-        body { margin: 0; overflow: hidden; background-color: #1a1a1a; color: white; font-family: 'Georgia', serif; display: flex; justify-content: center; align-items: center; height: 100vh; touch-action: none; }
-        canvas { background-color: #214332; box-shadow: 0 0 20px rgba(0,0,0,0.5); max-width: 100%; max-height: 100%; object-fit: contain; touch-action: none; }
+        * { user-select: none; -webkit-user-select: none; touch-action: none; box-sizing: border-box; }
+        body { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background-color: #1a1a1a; color: white; font-family: 'Georgia', serif; }
+        canvas { display: block; background-color: #214332; }
+        
         #ui { position: absolute; top: 10px; left: 10px; font-size: 20px; pointer-events: none; line-height: 1.5; text-shadow: 1px 1px 2px black; z-index: 5; }
         .controls { position: absolute; bottom: 10px; left: 10px; font-size: 14px; color: #888; z-index: 5; pointer-events: none; }
+        
         #bossHpContainer { display: none; position: absolute; top: 10px; right: 10px; width: 200px; height: 20px; border: 2px solid #fff; z-index: 5; }
         #bossHpBar { width: 100%; height: 100%; background-color: #ff4444; transition: width 0.1s; }
-        #playerHpContainer { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); width: 300px; height: 15px; border: 2px solid #fff; z-index: 5; }
+        
+        #playerHpContainer { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); width: 300px; height: 15px; border: 2px solid #fff; z-index: 5; pointer-events: none; }
         #playerHpBar { width: 100%; height: 100%; background-color: #44ff44; transition: width 0.2s, background-color 0.2s; }
         
         /* Intro Screen Overlay */
-        #introScreen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.95); z-index: 20; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 30px; text-align: left; }
+        #introScreen { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background-color: rgba(0,0,0,0.95); z-index: 20; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 30px; text-align: left; overflow-y: auto; }
         #introScreen h1 { color: #ffaa00; margin-bottom: 10px; font-size: 36px; text-shadow: 0 0 10px #ffaa00; text-align: center; }
         #introScreen p, #introScreen ul { max-width: 600px; font-size: 16px; line-height: 1.6; color: #eeeeee; }
         #introScreen li { margin-bottom: 8px; }
-        #startBtn { position: relative; z-index: 30; margin-top: 20px; padding: 15px 40px; font-size: 22px; cursor: pointer; background: #1a1a1a; color: #ffaa00; border: 2px solid #ffaa00; border-radius: 8px; font-weight: bold; font-family: 'Georgia', serif; transition: background 0.2s, color 0.2s; }
+        #startBtn { position: relative; z-index: 30; margin-top: 20px; margin-bottom: 40px; padding: 15px 40px; font-size: 22px; cursor: pointer; background: #1a1a1a; color: #ffaa00; border: 2px solid #ffaa00; border-radius: 8px; font-weight: bold; font-family: 'Georgia', serif; transition: background 0.2s, color 0.2s; }
         #startBtn:active, #startBtn:hover { background: #ffaa00; color: #000; }
 
         /* Virtual Touch Controls */
-        #touchControls { display: none; position: absolute; bottom: 30px; right: 30px; width: 160px; height: 160px; z-index: 10; touch-action: none; }
+        #touchControls { display: none; position: absolute; bottom: 30px; right: 30px; width: 160px; height: 160px; z-index: 10; }
         .touch-btn { position: absolute; width: 65px; height: 65px; border-radius: 50%; background: rgba(255, 255, 255, 0.15); border: 2px solid; display: flex; justify-content: center; align-items: center; font-size: 24px; font-weight: bold; }
         .touch-btn:active { background: rgba(255, 255, 255, 0.4); }
         #btnY { top: 45px; left: 0; border-color: #00ffff; color: #00ffff; }
@@ -44,7 +47,9 @@
         <p>The floating sprites have either a good meaning or a bad meaning related to your characters. Break the barriers to collect the good ones for points. If you collide with a bad one, or a shielded good one, you lose health and level points.</p>
         <p>You must completely destroy the bad characters, or use <b>诗</b> to transform them into good ones to collect them. For instance: 恒 means lasting and constant, which is a good meaning related to time (鐘), so 鐘 gains points to level up when 恒 is absorbed.</p>
         <p><b>Goal:</b> Collect as many good meaning characters as possible to level up until all sprites are gone.</p>
-        <button id="startBtn">START GAME</button>
+        
+        <!-- Native onclick to bypass any browser event blocking -->
+        <button id="startBtn" onclick="startTheGame()">START GAME</button>
     </div>
 
     <div id="ui">
@@ -67,13 +72,23 @@
         <div class="touch-btn" id="btnZ">Z</div>
     </div>
 
-    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <canvas id="gameCanvas"></canvas>
 
 <script>
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-// Only enable touch UI if it's explicitly a mobile device (ignores Mac trackpads)
+// Dynamically size canvas to exact device screen pixels
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas(); // Set immediately on load
+
+let mouseX = canvas.width / 2;
+let mouseY = canvas.height / 2;
+
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 if (isMobile) {
     document.getElementById('desktopHint').style.display = 'none';
@@ -143,9 +158,9 @@ const xpLoss = { 1: 1, 2: 2, 3: 3, 4: 4, 5: 50 };
 class Player {
     constructor() {
         this.segments = [
-            { char: '鐘', x: 400, y: 300 },
-            { char: '奕', x: 400, y: 330 },
-            { char: '诗', x: 400, y: 360 }
+            { char: '鐘', x: canvas.width / 2, y: canvas.height / 2 },
+            { char: '奕', x: canvas.width / 2, y: (canvas.height / 2) + 30 },
+            { char: '诗', x: canvas.width / 2, y: (canvas.height / 2) + 60 }
         ];
         this.speed = 4;
         this.size = 25;
@@ -482,7 +497,8 @@ class Sprite {
 
 class Boss {
     constructor() {
-        this.x = canvas.width / 2; this.y = -100; this.targetY = 150;
+        this.x = canvas.width / 2; this.y = -100; 
+        this.targetY = canvas.height * 0.25; // Adjusted dynamically for native height
         this.maxHp = 200; this.hp = 200; this.radius = 60; this.lastShot = 0;
         this.state = 'alive'; 
         this.deathTimer = 180;
@@ -493,7 +509,7 @@ class Boss {
         if (this.state === 'dying') return; 
 
         if (this.y < this.targetY) this.y += 1 * timeMultiplier;
-        this.x = (canvas.width / 2) + Math.sin(Date.now() / 1000) * 200;
+        this.x = (canvas.width / 2) + Math.sin(Date.now() / 1000) * (canvas.width * 0.25);
         
         this.lastShot += timeMultiplier;
         if (this.lastShot > (180 / (timeScale === 0 ? 0.01 : timeScale))) {
@@ -523,7 +539,6 @@ class Boss {
 
 // --- SYSTEM EVENTS & INPUT ---
 let gameStarted = false;
-let mouseX = 400, mouseY = 300;
 const keys = { z: false, y: false, s: false };
 let gameTime = 0, lastFrame = Date.now(), phase = 1, isWin = false, isGameOver = false;
 
@@ -533,49 +548,37 @@ const bullets = [], orbs = [];
 let sprites = [];
 let spawnTimer = 0;
 
-// FAIL-SAFE START BUTTON LOGIC
-const startGameHandler = (e) => {
-    if(e) e.preventDefault();
+// FAIL-SAFE DIRECT ONCLICK HANDLER FOR HTML BUTTON
+window.startTheGame = function() {
     document.getElementById('introScreen').style.display = 'none';
     gameStarted = true;
-    lastFrame = Date.now(); // Reset time to prevent delta-time jump
+    lastFrame = Date.now(); // Reset time to prevent massive jump lag
 };
-const startBtn = document.getElementById('startBtn');
-startBtn.addEventListener('click', startGameHandler);
-startBtn.addEventListener('touchstart', startGameHandler, {passive: false});
 
 // Virtual Touch Controllers
 const bindTouchBtn = (btnId, keyStr) => {
     const btn = document.getElementById(btnId);
-    btn.addEventListener('touchstart', (e) => { e.preventDefault(); keys[keyStr] = true; });
-    btn.addEventListener('touchend', (e) => { e.preventDefault(); keys[keyStr] = false; });
+    btn.addEventListener('touchstart', (e) => { e.stopPropagation(); e.preventDefault(); keys[keyStr] = true; }, {passive: false});
+    btn.addEventListener('touchend', (e) => { e.stopPropagation(); e.preventDefault(); keys[keyStr] = false; }, {passive: false});
 };
 bindTouchBtn('btnZ', 'z'); bindTouchBtn('btnY', 'y'); bindTouchBtn('btnX', 's');
 
+// 1-to-1 Native touch tracking
 canvas.addEventListener('touchmove', (e) => {
     e.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    mouseX = (e.touches[0].clientX - rect.left) * scaleX;
-    mouseY = (e.touches[0].clientY - rect.top) * scaleY;
+    mouseX = e.touches[0].clientX;
+    mouseY = e.touches[0].clientY;
 }, {passive: false});
 
 canvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    mouseX = (e.touches[0].clientX - rect.left) * scaleX;
-    mouseY = (e.touches[0].clientY - rect.top) * scaleY;
+    mouseX = e.touches[0].clientX;
+    mouseY = e.touches[0].clientY;
 }, {passive: false});
 
 canvas.addEventListener('mousemove', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    mouseX = (e.clientX - rect.left) * scaleX; 
-    mouseY = (e.clientY - rect.top) * scaleY;
+    mouseX = e.clientX; 
+    mouseY = e.clientY;
 });
 window.addEventListener('keydown', (e) => { const key = e.key.toLowerCase(); if (keys.hasOwnProperty(key)) keys[key] = true; });
 window.addEventListener('keyup', (e) => { const key = e.key.toLowerCase(); if (keys.hasOwnProperty(key)) keys[key] = false; });
