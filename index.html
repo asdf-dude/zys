@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鐘奕诗 - 生日快乐</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; color: white; font-family: 'Georgia', serif; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        canvas { background-color: #214332; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+        #ui { position: absolute; top: 10px; left: 10px; font-size: 20px; pointer-events: none; line-height: 1.5; }
+        .controls { position: absolute; bottom: 10px; left: 10px; font-size: 14px; color: #888; }
+        #bossHpContainer { display: none; position: absolute; top: 10px; right: 10px; width: 200px; height: 20px; border: 2px solid #fff; }
+        #bossHpBar { width: 100%; height: 100%; background-color: #ff4444; transition: width 0.1s; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div>Time: <span id="timeDisplay">0</span>s</div>
+        <div id="phaseDisplay" style="color: #ffaa00;">Phase 1: Floating</div>
+        <div style="margin-top: 10px; font-weight: bold;">
+            <span style="color: hsla(110, 100%, 87%, 0.638);">鐘 Level: <span id="lvlZhong">1</span></span> | 
+            <span style="color: #00ffff7a;">奕 Level: <span id="lvlYi">1</span></span> | 
+            <span style="color: #a690e29d;">诗 Level: <span id="lvlShi">1</span></span>
+        </div> 
+        <div style="margin-top: 10px; font-weight: bold;">
+            <span style="color: #44ff44;">鐘: <span id="zhongUpgradeBar">0</span></span>
+        </div>
+    </div>
+    <div id="bossHpContainer"><div id="bossHpBar"></div></div>
+    <div class="controls">Mouse: Move/Aim | Z: Time (鐘) | Y: Shoot (奕) | S: Orb (诗)</div>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// --- THE LINGUISTIC DICTIONARY (With Ownership) ---
+const wordData = {
+    '准': { owner: 'zhong', type: 'good' }, '恒': { owner: 'zhong', type: 'good' },
+    '盛': { owner: 'yi', type: 'good' }, '赢': { owner: 'yi', type: 'good' },
+    '雅': { owner: 'shi', type: 'good' }, '梦': { owner: 'shi', type: 'good' },
+    
+    '急': { owner: 'zhong', type: 'bad1', transform: '莫急' },
+    '停': { owner: 'zhong', type: 'bad1', transform: '不停' },
+    '拖延': { owner: 'zhong', type: 'bad2', transform: '一寸光阴一寸金' },
+    '放弃': { owner: 'zhong', type: 'bad2', transform: '始终如一' },
+    
+    '败': { owner: 'yi', type: 'bad1', transform: '不败' },
+    '愁': { owner: 'yi', type: 'bad1', transform: '莫愁' },
+    '萎靡': { owner: 'yi', type: 'bad2', transform: '神采奕奕' },
+    '平庸': { owner: 'yi', type: 'bad2', transform: '卓尔不群' },
+    
+    '俗': { owner: 'shi', type: 'bad1', transform: '脱俗' },
+    '乏': { owner: 'shi', type: 'bad1', transform: '解乏' },
+    '卖弄': { owner: 'shi', type: 'bad2', transform: '腹有诗书气自华' },
+    '枯燥': { owner: 'shi', type: 'bad2', transform: '诗情画意' }
+};
+
+// Register the transformed (Good) words back into the dictionary dynamically
+Object.values(wordData).forEach(data => {
+    if (data.transform) {
+        wordData[data.transform] = { owner: data.owner, type: 'good' };
+    }
+});
+
+const spawnPool = Object.keys(wordData).filter(w => wordData[w].type !== 'good');
+const goodSpawnPool = Object.keys(wordData).filter(w => wordData[w].type === 'good' && w.length === 1);
+
+// --- CLASSES ---
+class Player {
+    constructor() {
+        this.segments = [
+            { char: '鐘', x: 400, y: 300 },
+            { char: '奕', x: 400, y: 330 },
+            { char: '诗', x: 400, y: 360 }
+        ];
+        this.speed = 4;
+        this.size = 25;
+        this.upgrades = { zhong: 1, yi: 1, shi: 1 };
+        this.lastShot = 0;
+        this.lastOrb = 0;
+    }
+// Player movement logic with simple follow mechanics
+    update(mouseX, mouseY) {
+        const head = this.segments[0];
+        const dx = mouseX - head.x;
+        const dy = mouseY - head.y;
+        const dist = Math.hypot(dx, dy);
+        
+        // If distance is greater than speed, move towards the mouse position so it can come closer to the cursor when the player's cursor appears suddenly far away
+        if (dist > this.speed) {
+            head.x += (dx / dist) * this.speed;
+            head.y += (dy / dist) * this.speed;
+        }
+        // Each segment follows the previous one with a slight delay, creating a snake-like movement
+        for (let i = 1; i < this.segments.length; i++) {
+            const current = this.segments[i];
+            const prev = this.segments[i - 1];
+            const sdx = prev.x - current.x;
+            const sdy = prev.y - current.y;
+            const sDist = Math.hypot(sdx, sdy);
+            // Only move if the segment is too far from the previous one to prevent jittering when they are close
+            if (sDist > 30) {
+                current.x += (sdx / sDist) * (this.speed * 0.9);
+                current.y += (sdy / sDist) * (this.speed * 0.9);
+            }
+        }
+    }
+
+    draw(ctx) {
+        ctx.font = '24px Georgia';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        this.segments.forEach((seg, index) => {
+            if(index === 0) ctx.fillStyle = 'hsla(110, 100%, 87%, 0.638)';
+            else if(index === 1) ctx.fillStyle = '#00ffff7a';
+            else ctx.fillStyle = '#a690e29d';
+            ctx.fillText(seg.char, seg.x, seg.y);
+        });
+    }
+
+    shoot(bullets, mouseX, mouseY) {
+        const now = Date.now();
+        const lvl = this.upgrades.yi;
+        
+        // Stage configurations
+        let cooldown = 400, speed = 8, radius = 5, type = 'bullet';
+        if (lvl === 2) { cooldown = 300; radius = 10; speed = 10; }
+        else if (lvl === 3) { cooldown = 100; speed = 12; }
+        else if (lvl === 4) { cooldown = 5; radius = 4; speed = 110; } // Laser stream
+        else if (lvl === 5) { cooldown = 800; radius = 12; speed = 5; type = 'electro'; }
+
+        if (now - this.lastShot > cooldown) {
+            const yi = this.segments[1];
+            bullets.push(new Projectile(yi.x, yi.y, mouseX, mouseY, type, speed, radius));
+            this.lastShot = now;
+        }
+    }
+
+    fireOrb(orbs, mouseX, mouseY) {
+        const now = Date.now();
+        const lvl = this.upgrades.shi;
+        
+        if (lvl === 5 && (now - this.lastOrb > 2000)) {
+            // Level 5: Global Transformation Flash
+            sprites.forEach(s => {
+                if (!s.isGood && wordData[s.text]) {
+                    s.text = wordData[s.text].transform;
+                    s.isGood = true;
+                    s.hasShield = false;
+                }
+            });
+            this.lastOrb = now;
+            
+            // Screen flash effect
+            ctx.fillStyle = 'rgba(255, 170, 238, 0.3)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            return;
+        }
+
+        if (now - this.lastOrb > 800) {
+            const shi = this.segments[2];
+            let lifespan = lvl >= 2 ? 150 : 60; // Lvl 2 increases distance
+            
+            if (lvl >= 3) {
+                // Fire 3 spread
+                [-0.3, 0, 0.3].forEach(angleOffset => {
+                    orbs.push(new Projectile(shi.x, shi.y, mouseX, mouseY, 'orb', 5, 10, lifespan, angleOffset));
+                });
+            } else {
+                orbs.push(new Projectile(shi.x, shi.y, mouseX, mouseY, 'orb', 5, 10, lifespan));
+            }
+            this.lastOrb = now;
+        }
+    }
+}
+
+class Projectile {
+    constructor(x, y, tx, ty, type, speed, radius, lifespan = 100, angleOffset = 0) {
+        this.x = x; this.y = y; this.type = type; 
+        this.speed = speed; this.radius = radius;
+        this.lifespan = lifespan;
+        
+        let angle = Math.atan2(ty - y, tx - x) + angleOffset;
+        this.vx = Math.cos(angle) * this.speed;
+        this.vy = Math.sin(angle) * this.speed;
+    }
+    update() {
+        this.x += this.vx; this.y += this.vy;
+        if(this.type === 'orb') this.lifespan--;
+        
+        // Level 5 Yi Electrobolt Logic
+        if (this.type === 'electro') {
+            sprites.forEach(s => {
+                if (s.hasShield && Math.hypot(this.x - s.x, this.y - s.y) < 100) {
+                    s.hasShield = false; // Zap shields in radius
+                    // Draw lightning arc
+                    ctx.beginPath(); ctx.moveTo(this.x, this.y); ctx.lineTo(s.x, s.y);
+                    ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 2; ctx.stroke(); ctx.closePath();
+                }
+            });
+        }
+    }
+    draw(ctx) {
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        if (this.type === 'electro') {
+            ctx.fillStyle = (Math.random() > 0.5) ? '#ffffff' : '#00ffff';
+            ctx.shadowBlur = 10; ctx.shadowColor = '#00ffff';
+        } else {
+            ctx.fillStyle = this.type === 'bullet' ? '#00ffff' : '#ffaaee';
+            ctx.shadowBlur = 0;
+        }
+        ctx.fill(); ctx.closePath(); ctx.shadowBlur = 0; // Reset
+    }
+}
+
+class Sprite {
+    constructor(isGood, spawnX = null, spawnY = null, targetX = null, targetY = null) {
+        this.isGood = isGood;
+        
+        if (isGood) {
+            this.text = goodSpawnPool[Math.floor(Math.random() * goodSpawnPool.length)];
+        } else {
+            // Spawn Stage 1 or Stage 2 bad words based on game progress
+            let pool = (gameTime > 60 && Math.random() > 0.7) 
+                ? spawnPool.filter(w => wordData[w].type === 'bad2') 
+                : spawnPool.filter(w => wordData[w].type === 'bad1');
+            this.text = pool[Math.floor(Math.random() * pool.length)] || spawnPool[0];
+        }
+        
+        this.x = spawnX !== null ? spawnX : (Math.random() < 0.5 ? -50 : canvas.width + 50);
+        this.y = spawnY !== null ? spawnY : Math.random() * canvas.height;
+        this.hasShield = true;
+        this.speed = 1 + Math.random();
+        this.radius = 20;
+
+        if (targetX !== null && targetY !== null) {
+            const angle = Math.atan2(targetY - this.y, targetX - this.x);
+            this.vx = Math.cos(angle) * (this.speed * 1.5);
+            this.vy = Math.sin(angle) * (this.speed * 1.5);
+        } else {
+            this.vx = (Math.random() - 0.5) * this.speed;
+            this.vy = (Math.random() - 0.5) * this.speed;
+        }
+    }
+
+    update(phase, playerHead, timeScale) {
+        const currentSpeedScale = this.isGood ? 1 : timeScale;
+
+        if (phase === 2 && !this.isGood && currentSpeedScale > 0) {
+            const angle = Math.atan2(playerHead.y - this.y, playerHead.x - this.x);
+            this.x += Math.cos(angle) * (this.speed * 0.5) * currentSpeedScale;
+            this.y += Math.sin(angle) * (this.speed * 0.5) * currentSpeedScale;
+        } else {
+            this.x += this.vx * currentSpeedScale;
+            this.y += this.vy * currentSpeedScale;
+            
+            if (this.x < 0 && this.vx < 0) this.vx *= -1;
+            if (this.x > canvas.width && this.vx > 0) this.vx *= -1;
+            if (this.y < 0 && this.vy < 0) this.vy *= -1;
+            if (this.y > canvas.height && this.vy > 0) this.vy *= -1;
+        }
+    }
+
+    draw(ctx) {
+        ctx.font = '20px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        if (this.hasShield) {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius + (this.text.length > 1 ? 40 : 5), 0, Math.PI * 2);
+            ctx.strokeStyle = this.isGood ? '#44ff44' : '#ff4444';
+            ctx.lineWidth = 2; ctx.stroke(); ctx.closePath();
+        }
+        ctx.fillStyle = this.isGood ? '#aaffaa' : '#ffaaaa';
+        ctx.fillText(this.text, this.x, this.y);
+    }
+}
+
+class Boss {
+    // Boss logic remains mostly unchanged for brevity
+    constructor() {
+        this.x = canvas.width / 2; this.y = -100; this.targetY = 150;
+        this.maxHp = 200; this.hp = 200; this.radius = 60; this.lastShot = 0;
+    }
+    update(timeScale, playerHead) {
+        if (this.y < this.targetY) this.y += 1;
+        this.x = (canvas.width / 2) + Math.sin(Date.now() / 1000) * 200;
+        const now = Date.now();
+        if (now - this.lastShot > (1500 / (timeScale === 0 ? 0.01 : timeScale))) {
+            sprites.push(new Sprite(false, this.x, this.y + this.radius, playerHead.x, playerHead.y));
+            this.lastShot = now;
+        }
+    }
+    draw(ctx) {
+        ctx.font = 'bold 30px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = `rgba(255, 68, 68, ${0.5 + (this.hp/this.maxHp)*0.5})`;
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke(); ctx.closePath();
+        ctx.fillStyle = '#ffffff'; ctx.fillText('BOSS', this.x, this.y);
+    }
+}
+
+// Game State
+let mouseX = 400, mouseY = 300;
+const keys = { z: false, y: false, s: false };
+let gameTime = 0, lastFrame = Date.now(), phase = 1, isWin = false;
+
+const player = new Player();
+let boss = null;
+const bullets = [], orbs = [];
+let sprites = [];
+
+canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    mouseX = e.clientX - rect.left; mouseY = e.clientY - rect.top;
+});
+window.addEventListener('keydown', (e) => { const key = e.key.toLowerCase(); if (keys.hasOwnProperty(key)) keys[key] = true; });
+window.addEventListener('keyup', (e) => { const key = e.key.toLowerCase(); if (keys.hasOwnProperty(key)) keys[key] = false; });
+
+setInterval(() => {
+    if (phase < 3 && sprites.length < 15) sprites.push(new Sprite(Math.random() > 0.5));
+}, 2000);
+
+function getFacingAngle(sprite, head) {
+    const angleToMouse = Math.atan2(mouseY - head.y, mouseX - head.x);
+    const angleToSprite = Math.atan2(sprite.y - head.y, sprite.x - head.x);
+    let diff = Math.abs(angleToMouse - angleToSprite);
+    if (diff > Math.PI) diff = 2 * Math.PI - diff;
+    return diff;
+}
+
+function updateUI() {
+    document.getElementById('timeDisplay').innerText = Math.floor(gameTime);
+    document.getElementById('lvlZhong').innerText = player.upgrades.zhong;
+    document.getElementById('lvlYi').innerText = player.upgrades.yi;
+    document.getElementById('lvlShi').innerText = player.upgrades.shi;
+}
+// A bar to show how many points requried to reach the next level for each charecter.
+function lvlBar(level) {
+    const currentLevel = level; 
+    return '▮'.repeat(level) + '▯'.repeat(5 - level);
+}
+function checkCollisions() {
+    // Bullets (Yi)
+    for (let i = bullets.length - 1; i >= 0; i--) {
+        let destroyed = false;
+        if (boss && phase === 3 && Math.hypot(bullets[i].x - boss.x, bullets[i].y - boss.y) < boss.radius + bullets[i].radius) {
+            boss.hp -= (bullets[i].type === 'electro' ? 5 : 2); // Electro deals more damage
+            document.getElementById('bossHpBar').style.width = `${Math.max(0, (boss.hp / boss.maxHp) * 100)}%`;
+            destroyed = true;
+        }
+        if (!destroyed) {
+            for (let j = sprites.length - 1; j >= 0; j--) {
+                const s = sprites[j];
+                if (Math.hypot(bullets[i].x - s.x, bullets[i].y - s.y) < s.radius + (s.text.length > 1 ? 40 : 5) + bullets[i].radius) {
+                    if(bullets[i].type !== 'electro') destroyed = true; // Electro pierces
+                    if (s.hasShield) s.hasShield = false;
+                    else if (!s.isGood) sprites.splice(j, 1);
+                    break;
+                }
+            }
+        }
+        if (destroyed) bullets.splice(i, 1);
+    }
+
+    // Orbs (Shi)
+    for (let i = orbs.length - 1; i >= 0; i--) {
+        for (let j = sprites.length - 1; j >= 0; j--) {
+            const o = orbs[i], s = sprites[j];
+            if (Math.hypot(o.x - s.x, o.y - s.y) < s.radius + (s.text.length > 1 ? 40 : 5) + o.radius) {
+                orbs.splice(i, 1);
+                const wordInfo = wordData[s.text];
+                // Check Level limits for transformation
+                if (!s.isGood && wordInfo && wordInfo.transform) {
+                    if (wordInfo.type === 'bad1' || (wordInfo.type === 'bad2' && player.upgrades.shi >= 4)) {
+                        s.text = wordInfo.transform;
+                        s.isGood = true; s.hasShield = false;
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    // Player Absorption
+    const head = player.segments[0];
+    for (let i = sprites.length - 1; i >= 0; i--) {
+        const s = sprites[i];
+        if (Math.hypot(head.x - s.x, head.y - s.y) < s.radius + (s.text.length > 1 ? 40 : 0) + player.size) {
+            const owner = wordData[s.text] ? wordData[s.text].owner : null;
+            if (owner) {
+                if (s.isGood && !s.hasShield) {
+                    player.upgrades[owner] = Math.min(5, player.upgrades[owner] + 1);
+                } else {
+                    player.upgrades[owner] = Math.max(1, player.upgrades[owner] - 1);
+                }
+            }
+            sprites.splice(i, 1);
+        }
+    }
+}
+
+function gameLoop() {
+    if (isWin) return;
+    const now = Date.now(), dt = (now - lastFrame) / 1000;
+    lastFrame = now; gameTime += dt;
+    updateUI();
+
+    // --- ZHONG TIME MECHANICS (Z KEY) ---
+    let closestSprite = null, minSqDist = Infinity;
+    sprites.forEach(s => {
+        const distSq = Math.pow(s.x - player.segments[0].x, 2) + Math.pow(s.y - player.segments[0].y, 2);
+        if(distSq < minSqDist) { minSqDist = distSq; closestSprite = s; }
+    });
+
+    // --- PHASE MANAGEMENT ---
+    if (gameTime > 300) {
+        phase = 3; document.getElementById('phaseDisplay').innerText = "Phase 3: The Amalgamation";
+        if (!boss && sprites.length === 0) { boss = new Boss(); document.getElementById('bossHpContainer').style.display = 'block'; }
+        if (boss && boss.hp <= 0) {
+            isWin = true; document.getElementById('bossHpContainer').style.display = 'none';
+            ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#ffaa00'; ctx.font = '50px Arial';
+            ctx.fillText('鐘奕诗，生日快乐！！！', canvas.width/2, canvas.height/2);
+            return;
+        }
+    } else if (gameTime > 180) phase = 2;
+
+    // --- UPDATES ---
+    player.update(mouseX, mouseY);
+    if (keys.y) player.shoot(bullets, mouseX, mouseY);
+    if (keys.s) player.fireOrb(orbs, mouseX, mouseY);
+
+    bullets.forEach((b, i) => { b.update(); if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) bullets.splice(i, 1); });
+    orbs.forEach((o, i) => { o.update(); if (o.lifespan <= 0 || o.x < 0 || o.x > canvas.width || o.y < 0 || o.y > canvas.height) orbs.splice(i, 1); });
+    
+    // Apply time logic per sprite
+    sprites.forEach(s => {
+        let timeScale = 1;
+        if (keys.z) {
+            const lvl = player.upgrades.zhong;
+            const isClosest = (s === closestSprite);
+            const isFacing = getFacingAngle(s, player.segments[0]) < 0.5; // ~30 degrees
+            const dist = Math.hypot(s.x - player.segments[0].x, s.y - player.segments[0].y);
+
+            if (lvl === 1 && isClosest) timeScale = 0.3;
+            if (lvl === 2 && (isClosest || isFacing)) timeScale = 0.1;
+            if (lvl === 3 && (isClosest || isFacing)) timeScale = 0;
+            if (lvl === 4 && (isFacing || dist < 150)) timeScale = 0;
+            if (lvl === 5) timeScale = 0;
+        }
+        s.update(phase, player.segments[0], timeScale);
+    });
+
+    if (boss) {
+        let bossTimeScale = (keys.z && player.upgrades.zhong === 5) ? 0 : (keys.z ? 0.5 : 1);
+        boss.update(bossTimeScale, player.segments[0]);
+    }
+
+    checkCollisions();
+
+    // --- RENDER ---
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw Zhong Lvl 4 Radius visual indicator if holding Z
+    if (keys.z && player.upgrades.zhong === 4) {
+        ctx.beginPath(); ctx.arc(player.segments[0].x, player.segments[0].y, 150, 0, Math.PI*2);
+        ctx.fillStyle = 'rgba(255, 221, 0, 0.1)'; ctx.fill(); ctx.closePath();
+    }
+
+    bullets.forEach(b => b.draw(ctx));
+    orbs.forEach(o => o.draw(ctx));
+    sprites.forEach(s => s.draw(ctx));
+    if (boss) boss.draw(ctx);
+    player.draw(ctx);
+
+    requestAnimationFrame(gameLoop);
+}
+gameLoop();
+</script>
+</body>
+</html>
