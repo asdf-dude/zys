@@ -439,16 +439,20 @@ function checkCollisions(timeMultiplier) {
     }
     sprites = sprites.filter(s => !s.dead); 
 
+  // Orbs (Shi)
     for (let i = orbs.length - 1; i >= 0; i--) {
         for (let j = sprites.length - 1; j >= 0; j--) {
             const o = orbs[i], s = sprites[j];
             if (Math.hypot(o.x - s.x, o.y - s.y) < s.radius + (s.text.length > 1 ? 40 : 5) + o.radius) {
-                orbs.splice(i, 1);
                 const wordInfo = wordData[s.text];
-                if (!s.isGood && wordInfo && wordInfo.transform && (wordInfo.type === 'bad1' || (wordInfo.type === 'bad2' && player.levels.shi >= 4))) {
-                    s.triggerTransform(wordInfo.modifier);
+                // Only destroys the orb IF it successfully triggers a transformation
+                if (!s.isGood && wordInfo && wordInfo.transform) {
+                    if (wordInfo.type === 'bad1' || (wordInfo.type === 'bad2' && player.levels.shi >= 4)) {
+                        orbs.splice(i, 1);
+                        s.triggerTransform(wordInfo.modifier);
+                        break;
+                    }
                 }
-                break;
             }
         }
     }
